@@ -44,3 +44,21 @@ export interface Category {
   name: string;
   createdAt: number;
 }
+
+/** ナレッジの種類 */
+export type KnowledgeKind = 'listen' | 'talk' | 'care' | 'trouble' | 'mind' | 'other';
+
+/** コミュニケーションで大切なこと・ナレッジ */
+export interface KnowledgeData {
+  title: string;
+  body: string;
+  kind: KnowledgeKind;
+  source: string; // どこで知ったか（本・人・経験など）
+  important: boolean; // 大事（★）
+}
+
+export interface Knowledge extends KnowledgeData {
+  id: string;
+  createdAt: number;
+  updatedAt: number;
+}

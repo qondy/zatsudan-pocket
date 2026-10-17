@@ -2,7 +2,9 @@ import {
   addDoc, arrayRemove, arrayUnion, collection, deleteDoc, doc, getDoc, increment, onSnapshot, updateDoc, writeBatch,
 } from 'firebase/firestore';
 import { db } from './firebase';
-import { Category, Neta, NetaData, Person, PersonData, Relation, TalkLog } from './types';
+import {
+  Category, Knowledge, KnowledgeData, KnowledgeKind, Neta, NetaData, Person, PersonData, Relation, TalkLog,
+} from './types';
 
 export const MAX_TITLE = 60;
 export const MAX_BODY = 1000;
@@ -13,13 +15,18 @@ export const MAX_LOGS = 100;
 export const MAX_CATEGORY_NAME = 20;
 export const MAX_CATEGORIES = 30;
 export const MAX_NETA_PERSONS = 30;
+export const MAX_KNOWLEDGE_TITLE = 60;
+export const MAX_KNOWLEDGE_BODY = 2000;
+export const MAX_SOURCE = 60;
 
 const DEFAULT_CATEGORIES = ['雑談', '鉄板ネタ', '質問ネタ', 'ニュース', '趣味', '季節の話題'];
 
 export const RELATIONS: Relation[] = ['work', 'friend', 'family', 'neighbor', 'other'];
+export const KNOWLEDGE_KINDS: KnowledgeKind[] = ['listen', 'talk', 'care', 'trouble', 'mind', 'other'];
 
 const str = (v: unknown, max: number): string => (typeof v === 'string' ? v.slice(0, max) : '');
 const msOrNull = (v: unknown): number | null => (typeof v === 'number' && v > 0 ? v : null);
+const safeKind = (v: unknown): KnowledgeKind => (KNOWLEDGE_KINDS.includes(v as KnowledgeKind) ? (v as KnowledgeKind) : 'other');
 const safeRelation = (v: unknown): Relation => (RELATIONS.includes(v as Relation) ? (v as Relation) : 'other');
 const safeId = (v: unknown): string => (typeof v === 'string' && /^[A-Za-z0-9_-]{1,40}$/.test(v) ? v : '');
 
@@ -213,6 +220,68 @@ export function addTalkLog(uid: string, personId: string, date: string, text: st
 
 export function deleteTalkLog(uid: string, personId: string, log: TalkLog): Promise<void> {
   return updateDoc(personDoc(uid, personId), { logs: arrayRemove(log) });
+}
+
+// ============================================================
+// ナレッジ
+// ============================================================
+const knowledgesCol = (uid: string) => collection(db, 'users', uid, 'knowledges');
+const knowledgeDoc = (uid: string, id: string) => doc(db, 'users', uid, 'knowledges', id);
+
+function sanitizeKnowledge(data: KnowledgeData): KnowledgeData {
+  return {
+    title: data.title.trim().slice(0, MAX_KNOWLEDGE_TITLE),
+    body: data.body.slice(0, MAX_KNOWLEDGE_BODY),
+    kind: safeKind(data.kind),
+    source: data.source.trim().slice(0, MAX_SOURCE),
+    important: data.important === true,
+  };
+}
+
+export function subscribeKnowledges(
+  uid: string,
+  onData: (list: Knowledge[]) => void,
+  onError: (err: Error) => void,
+): () => void {
+  return onSnapshot(knowledgesCol(uid), (snap) => {
+    const list: Knowledge[] = [];
+    snap.forEach((d) => {
+      const data = d.data();
+      const createdAt = msOrNull(data.createdAt);
+      const title = str(data.title, MAX_KNOWLEDGE_TITLE).trim();
+      if (!createdAt || !title) return;
+      list.push({
+        id: d.id,
+        title,
+        body: str(data.body, MAX_KNOWLEDGE_BODY),
+        kind: safeKind(data.kind),
+        source: str(data.source, MAX_SOURCE),
+        important: data.important === true,
+        createdAt,
+        updatedAt: msOrNull(data.updatedAt) ?? createdAt,
+      });
+    });
+    onData(list);
+  }, onError);
+}
+
+export async function createKnowledge(uid: string, data: KnowledgeData): Promise<string> {
+  const now = Date.now();
+  const ref = await addDoc(knowledgesCol(uid), { ...sanitizeKnowledge(data), createdAt: now, updatedAt: now });
+  return ref.id;
+}
+
+export function updateKnowledge(uid: string, id: string, data: KnowledgeData): Promise<void> {
+  return updateDoc(knowledgeDoc(uid, id), { ...sanitizeKnowledge(data), updatedAt: Date.now() });
+}
+
+/** 「大事」の切り替え（並び順が変わらないよう updatedAt は触らない） */
+export function setKnowledgeImportant(uid: string, id: string, important: boolean): Promise<void> {
+  return updateDoc(knowledgeDoc(uid, id), { important: important === true });
+}
+
+export function deleteKnowledge(uid: string, id: string): Promise<void> {
+  return deleteDoc(knowledgeDoc(uid, id));
 }
 
 // ============================================================

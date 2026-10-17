@@ -424,7 +424,7 @@
 // ===== タブ（ネタ／ひと） =====
 .tabs {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 4px;
   padding: 4px;
   margin-bottom: $spacing-md;
@@ -907,6 +907,249 @@
   }
 }
 
+// ===== ナレッジ =====
+$color-star: #f59e0b;
+
+.today-card {
+  margin-bottom: $spacing-md;
+  padding: $spacing-md $spacing-lg $spacing-lg;
+  border-radius: $radius-lg;
+  background: $color-primary;
+  color: #fff;
+  box-shadow: 0 4px 16px rgba($color-primary, 0.25);
+
+  &__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: $spacing-sm;
+    margin-bottom: $spacing-sm;
+
+    .link-btn {
+      color: #fff;
+      min-height: 32px;
+    }
+  }
+
+  &__label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: $font-size-xs;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+  }
+
+  &__body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+    text-align: left;
+    color: #fff;
+  }
+
+  &__title {
+    font-size: $font-size-xl;
+    font-weight: 800;
+    line-height: 1.4;
+    word-break: break-word;
+  }
+
+  &__text {
+    font-size: $font-size-sm;
+    line-height: 1.8;
+    white-space: pre-wrap;
+    word-break: break-word;
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+
+    &:empty {
+      display: none;
+    }
+  }
+}
+
+.knowledge-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: $spacing-md;
+}
+
+.knowledge-card {
+  position: relative;
+  display: flex;
+  background: $color-surface;
+  border-radius: $radius-lg;
+  border-left: 4px solid $color-surface-3;
+  box-shadow: 0 2px 12px rgba($color-primary, 0.08);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba($color-primary, 0.16);
+  }
+
+  &.is-important {
+    border-left-color: $color-star;
+  }
+
+  &__btn {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    padding: $spacing-md 48px $spacing-md $spacing-md;
+    text-align: left;
+    color: $color-text;
+  }
+
+  &__title {
+    font-size: $font-size-base;
+    font-weight: 800;
+    line-height: 1.45;
+    word-break: break-word;
+  }
+
+  &__body {
+    font-size: $font-size-sm;
+    color: $color-text-muted;
+    line-height: 1.7;
+    white-space: pre-wrap;
+    word-break: break-word;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  &__source {
+    margin-top: auto;
+    font-size: $font-size-xs;
+    color: $color-text-muted;
+    word-break: break-word;
+  }
+
+  &__star {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: $color-surface-3;
+    transition: background 0.15s ease, color 0.15s ease;
+
+    span {
+      display: inline-flex;
+    }
+
+    &:hover {
+      background: $color-surface-2;
+      color: $color-star;
+    }
+
+    &.is-active {
+      color: $color-star;
+
+      svg {
+        fill: currentColor;
+      }
+    }
+
+    &:disabled {
+      opacity: 0.5;
+    }
+  }
+}
+
+.knowledge-body {
+  font-size: $font-size-base;
+}
+
+.star-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 8px 14px;
+  border: 1px solid $color-border;
+  border-radius: 999px;
+  background: $color-surface;
+  color: $color-text-muted;
+  font-size: $font-size-sm;
+  font-weight: 700;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+
+  &:hover {
+    border-color: $color-star;
+  }
+
+  &.is-active {
+    border-color: $color-star;
+    background: #fff7e6;
+    color: #b45309;
+
+    svg {
+      fill: $color-star;
+      stroke: $color-star;
+    }
+  }
+
+  &:disabled {
+    opacity: 0.5;
+  }
+}
+
+.field__note {
+  margin-top: 6px;
+  font-size: $font-size-xs;
+  color: $color-text-muted;
+  line-height: 1.6;
+}
+
+// 人の詳細に出す「今日の心得」
+.hint-box {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  margin: -$spacing-sm 0 $spacing-lg;
+  padding: 10px $spacing-md;
+  border-radius: $radius-md;
+  background: $color-surface-2;
+  text-align: left;
+  color: $color-text;
+  transition: background 0.15s ease;
+
+  &:hover {
+    background: $color-surface-3;
+  }
+
+  &__label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    font-weight: 800;
+    color: $color-primary-ink;
+  }
+
+  &__title {
+    font-size: $font-size-sm;
+    font-weight: 700;
+    word-break: break-word;
+  }
+}
+
 // ===== 左下「アプリについて」 =====
 .about-fab {
   position: fixed;
@@ -971,9 +1214,25 @@
   }
 
   .neta-list,
-  .person-list {
+  .person-list,
+  .knowledge-list {
     grid-template-columns: 1fr;
     gap: 10px;
+  }
+
+  // 3つのタブが収まるよう少し詰める
+  .tabs__btn {
+    gap: 4px;
+    padding: 10px 6px;
+    font-size: $font-size-sm;
+  }
+
+  .today-card {
+    padding: $spacing-md;
+
+    &__title {
+      font-size: $font-size-lg;
+    }
   }
 
   .field-row {

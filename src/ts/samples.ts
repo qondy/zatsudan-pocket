@@ -1,4 +1,4 @@
-import { PersonData } from './types';
+import { KnowledgeData, PersonData } from './types';
 
 export interface SampleNeta {
   title: string;
@@ -31,3 +31,27 @@ export const SAMPLE_PERSON: PersonData = {
   likes: '・キャンプ（夏に家族で行っている）\n・コーヒー（浅煎りが好き）\n・サッカー観戦',
   memo: '誕生日は5月。甘いものより、しょっぱいお菓子派。',
 };
+
+export const SAMPLE_KNOWLEDGES: KnowledgeData[] = [
+  {
+    title: '話すより、まず聞く',
+    kind: 'listen',
+    body: '相手が話し終わるまで口をはさまない。\n「それで？」「どうなったの？」と続きをうながすと、相手は気持ちよく話せる。\n自分の話は、聞かれてからで十分。',
+    source: '経験から',
+    important: true,
+  },
+  {
+    title: '名前を呼んで話しかける',
+    kind: 'talk',
+    body: '「おはようございます」より「佐藤さん、おはようございます」。\n名前を呼ぶだけで、距離がぐっと縮まる。',
+    source: '本で読んだ',
+    important: false,
+  },
+  {
+    title: '沈黙はこわくない',
+    kind: 'trouble',
+    body: '会話が止まっても、あせって話題を探さなくていい。\n困ったら、目の前のもの（天気・食べ物・場所）について聞いてみる。',
+    source: '',
+    important: false,
+  },
+];

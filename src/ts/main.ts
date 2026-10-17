@@ -1,13 +1,16 @@
 import { User } from 'firebase/auth';
 import { loginWithGoogle, logout, onAuthChange } from './auth';
 import { submitFeedback } from './feedback';
-import { SAMPLE_NETAS, SAMPLE_PERSON } from './samples';
+import { SAMPLE_KNOWLEDGES, SAMPLE_NETAS, SAMPLE_PERSON } from './samples';
 import {
-  addTalkLog, createCategory, createNeta, createPerson, deleteCategory, deleteNeta, deletePerson, deleteTalkLog,
-  ensureDefaultCategories, markNetaUsed, MAX_CATEGORIES, MAX_LOGS, newId, RELATIONS, renameCategory,
-  subscribeCategories, subscribeNetas, subscribePersons, undoNetaUsed, updateNeta, updatePerson,
+  addTalkLog, createCategory, createKnowledge, createNeta, createPerson, deleteCategory, deleteKnowledge, deleteNeta,
+  deletePerson, deleteTalkLog, ensureDefaultCategories, KNOWLEDGE_KINDS, markNetaUsed, MAX_CATEGORIES, MAX_LOGS, newId,
+  RELATIONS, renameCategory, setKnowledgeImportant, subscribeCategories, subscribeKnowledges, subscribeNetas,
+  subscribePersons, undoNetaUsed, updateKnowledge, updateNeta, updatePerson,
 } from './store';
-import { Category, Neta, NetaData, Person, PersonData, Relation } from './types';
+import {
+  Category, Knowledge, KnowledgeData, KnowledgeKind, Neta, NetaData, Person, PersonData, Relation,
+} from './types';
 import { closeOverlay, iconEl, openOverlay, showToast, textEl } from './ui';
 
 // ============================================================
@@ -19,12 +22,19 @@ const ICON_EDIT = '<path d="M40 12 L52 24 L24 52 H12 V40 Z"/><path d="M34 18 L46
 const ICON_TRASH = '<path d="M12 18 H52"/><path d="M26 18 V12 H38 V18"/><path d="M17 18 L20 54 H44 L47 18"/>';
 const ICON_CAUTION = '<path d="M32 10 L56 52 H8 Z"/><path d="M32 26 V38"/><circle cx="32" cy="45" r="2" fill="currentColor" stroke="none"/>';
 const ICON_CHECK = '<path d="M14 34 L26 46 L50 20"/>';
+const ICON_STAR = '<path d="M32 8 L39.5 24 L57 26.2 L44.2 38.2 L47.6 55.5 L32 47 L16.4 55.5 L19.8 38.2 L7 26.2 L24.5 24 Z"/>';
 
 const RELATION_LABEL: Record<Relation, string> = {
   work: '仕事', friend: '友人', family: '家族', neighbor: 'ご近所', other: 'その他',
 };
 
+const KIND_LABEL: Record<KnowledgeKind, string> = {
+  listen: '聞き方', talk: '話し方', care: '気配り', trouble: '気まずいとき', mind: '心がまえ', other: 'その他',
+};
+
 const TAB_KEY = 'zatsudan-pocket:tab';
+const KNOWLEDGE_SORT_KEY = 'zatsudan-pocket:knowledge-sort';
+const KIND_KEY = 'zatsudan-pocket:kind';
 const NETA_SORT_KEY = 'zatsudan-pocket:neta-sort';
 const PERSON_SORT_KEY = 'zatsudan-pocket:person-sort';
 const CATEGORY_KEY = 'zatsudan-pocket:category';
@@ -33,8 +43,10 @@ const UNCATEGORIZED = '__none__';
 const ALL = '__all__';
 const NETA_SORTS = ['new', 'fresh', 'few', 'many', 'title'];
 const PERSON_SORTS = ['updated', 'talked', 'long', 'name'];
+const KNOWLEDGE_SORTS = ['important', 'new', 'updated', 'title'];
+const TABS = ['neta', 'person', 'knowledge'] as const;
 
-type Tab = 'neta' | 'person';
+type Tab = (typeof TABS)[number];
 
 // ============================================================
 // 状態
@@ -43,27 +55,36 @@ let currentUser: User | null = null;
 let netas: Neta[] = [];
 let persons: Person[] = [];
 let categories: Category[] = [];
+let knowledges: Knowledge[] = [];
 let netasLoaded = false;
 let personsLoaded = false;
+let knowledgesLoaded = false;
 let unsubs: (() => void)[] = [];
 
-let tab: Tab = lsGet(TAB_KEY) === 'person' ? 'person' : 'neta';
+let tab: Tab = (TABS as readonly string[]).includes(lsGet(TAB_KEY)) ? (lsGet(TAB_KEY) as Tab) : 'neta';
 let netaQuery = '';
 let personQuery = '';
 let selectedCategory = lsGet(CATEGORY_KEY) || ALL;
 let selectedRelation = lsGet(RELATION_KEY) || ALL;
 let netaSort = lsGet(NETA_SORT_KEY) || 'new';
 let personSort = lsGet(PERSON_SORT_KEY) || 'updated';
+let knowledgeQuery = '';
+let selectedKind = lsGet(KIND_KEY) || ALL;
+let knowledgeSort = lsGet(KNOWLEDGE_SORT_KEY) || 'important';
+let todayOffset = 0; // 「別の心得」で進める
 
 let netaDetailId: string | null = null;
 let personDetailId: string | null = null;
+let knowledgeDetailId: string | null = null;
 
 let editingNetaId: string | null = null;
 let netaEditorPersons: string[] = [];
 let editingPersonId: string | null = null;
+let editingKnowledgeId: string | null = null;
+let knowledgeEditorImportant = false;
 let editorSnapshot = '';
 let editorBusy = false;
-let activeEditor: 'neta' | 'person' | null = null;
+let activeEditor: 'neta' | 'person' | 'knowledge' | null = null;
 
 let omakaseId: string | null = null;
 let confirmAction: (() => Promise<void>) | null = null;
@@ -85,17 +106,23 @@ const netaPanel = $('panel-neta');
 const personPanel = $('panel-person');
 const tabNeta = $('tab-neta');
 const tabPerson = $('tab-person');
+const knowledgePanel = $('panel-knowledge');
+const tabKnowledge = $('tab-knowledge');
 
 const netaList = $<HTMLUListElement>('neta-list');
 const personList = $<HTMLUListElement>('person-list');
 const categoryBar = $('category-bar');
 const relationBar = $('relation-bar');
+const knowledgeList = $<HTMLUListElement>('knowledge-list');
+const kindBar = $('kind-bar');
 
 const netaDetailOverlay = $('neta-detail-overlay');
 const netaEditorOverlay = $('neta-editor-overlay');
 const omakaseOverlay = $('omakase-overlay');
 const personDetailOverlay = $('person-detail-overlay');
 const personEditorOverlay = $('person-editor-overlay');
+const knowledgeDetailOverlay = $('knowledge-detail-overlay');
+const knowledgeEditorOverlay = $('knowledge-editor-overlay');
 const categoryOverlay = $('category-overlay');
 const discardOverlay = $('discard-dialog-overlay');
 const confirmOverlay = $('confirm-dialog-overlay');
@@ -113,6 +140,13 @@ const personCautionsInput = $<HTMLTextAreaElement>('input-person-cautions');
 const personLikesInput = $<HTMLTextAreaElement>('input-person-likes');
 const personMemoInput = $<HTMLTextAreaElement>('input-person-memo');
 const personSaveBtn = $<HTMLButtonElement>('btn-person-editor-save');
+
+const knowledgeTitleInput = $<HTMLInputElement>('input-knowledge-title');
+const knowledgeKindSelect = $<HTMLSelectElement>('input-knowledge-kind');
+const knowledgeSourceInput = $<HTMLInputElement>('input-knowledge-source');
+const knowledgeBodyInput = $<HTMLTextAreaElement>('input-knowledge-body');
+const knowledgeEditorStar = $<HTMLButtonElement>('btn-knowledge-editor-star');
+const knowledgeSaveBtn = $<HTMLButtonElement>('btn-knowledge-editor-save');
 
 const logDateInput = $<HTMLInputElement>('input-log-date');
 const logTextInput = $<HTMLInputElement>('input-log-text');
@@ -176,6 +210,7 @@ function personName(id: string): string {
 
 const findNeta = (id: string | null): Neta | undefined => (id ? netas.find((n) => n.id === id) : undefined);
 const findPerson = (id: string | null): Person | undefined => (id ? persons.find((p) => p.id === id) : undefined);
+const findKnowledge = (id: string | null): Knowledge | undefined => (id ? knowledges.find((k) => k.id === id) : undefined);
 
 /** その人に話したいネタ（存在する人だけを対象） */
 const netasFor = (personId: string): Neta[] => netas.filter((n) => n.personIds.includes(personId));
@@ -219,15 +254,18 @@ function setTab(next: Tab): void {
 }
 
 function renderTabs(): void {
-  const isNeta = tab === 'neta';
-  tabNeta.classList.toggle('is-active', isNeta);
-  tabPerson.classList.toggle('is-active', !isNeta);
-  tabNeta.setAttribute('aria-selected', String(isNeta));
-  tabPerson.setAttribute('aria-selected', String(!isNeta));
-  $('tab-neta-count').textContent = netas.length ? String(netas.length) : '';
-  $('tab-person-count').textContent = persons.length ? String(persons.length) : '';
-  netaPanel.classList.toggle('hidden', !isNeta);
-  personPanel.classList.toggle('hidden', isNeta);
+  const parts: [Tab, HTMLElement, HTMLElement, number][] = [
+    ['neta', tabNeta, netaPanel, netas.length],
+    ['person', tabPerson, personPanel, persons.length],
+    ['knowledge', tabKnowledge, knowledgePanel, knowledges.length],
+  ];
+  parts.forEach(([id, btn, panel, count]) => {
+    const on = tab === id;
+    btn.classList.toggle('is-active', on);
+    btn.setAttribute('aria-selected', String(on));
+    panel.classList.toggle('hidden', !on);
+    $(`tab-${id}-count`).textContent = count ? String(count) : '';
+  });
 }
 
 // ============================================================
@@ -433,12 +471,111 @@ function renderPersons(): void {
   $('person-empty-match').classList.toggle('hidden', persons.length === 0 || list.length > 0);
 }
 
+// ============================================================
+// ナレッジ一覧
+// ============================================================
+function filteredKnowledges(): Knowledge[] {
+  const q = knowledgeQuery.trim().toLowerCase();
+  const list = knowledges.filter((k) => {
+    if (selectedKind !== ALL && k.kind !== selectedKind) return false;
+    if (!q) return true;
+    return [k.title, k.body, k.source, KIND_LABEL[k.kind]].join(' ').toLowerCase().includes(q);
+  });
+  list.sort((a, b) => {
+    switch (knowledgeSort) {
+      case 'new':
+        return b.createdAt - a.createdAt;
+      case 'updated':
+        return b.updatedAt - a.updatedAt;
+      case 'title':
+        return a.title.localeCompare(b.title, 'ja');
+      default:
+        return Number(b.important) - Number(a.important) || b.updatedAt - a.updatedAt;
+    }
+  });
+  return list;
+}
+
+function renderKindBar(): void {
+  kindBar.textContent = '';
+  if (selectedKind !== ALL && !KNOWLEDGE_KINDS.includes(selectedKind as KnowledgeKind)) selectedKind = ALL;
+  const select = (id: string) => () => {
+    selectedKind = id;
+    lsSet(KIND_KEY, id);
+    render();
+  };
+  kindBar.append(chipButton('すべて', knowledges.length, selectedKind === ALL, select(ALL)));
+  KNOWLEDGE_KINDS.forEach((k) => {
+    const count = knowledges.filter((x) => x.kind === k).length;
+    if (count || selectedKind === k) kindBar.append(chipButton(KIND_LABEL[k], count, selectedKind === k, select(k)));
+  });
+}
+
+/** 「今日の心得」: 大事なもの（なければ全部）から、日付ごとに1つ選ぶ */
+function todayKnowledge(): Knowledge | undefined {
+  const starred = knowledges.filter((k) => k.important);
+  const pool = (starred.length ? starred : knowledges).slice().sort((a, b) => a.createdAt - b.createdAt);
+  if (!pool.length) return undefined;
+  const seed = todayStr().split('').reduce((acc, c) => (acc * 31 + c.charCodeAt(0)) % 100_003, 7);
+  return pool[(seed + todayOffset) % pool.length];
+}
+
+function renderToday(): void {
+  const k = todayKnowledge();
+  $('knowledge-today').classList.toggle('hidden', !k);
+  if (!k) return;
+  $('knowledge-today-title').textContent = k.title;
+  $('knowledge-today-text').textContent = k.body;
+  const poolSize = knowledges.filter((x) => x.important).length || knowledges.length;
+  $('btn-today-next').classList.toggle('hidden', poolSize < 2);
+}
+
+function starToggle(k: Knowledge, className: string): HTMLButtonElement {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = className + (k.important ? ' is-active' : '');
+  b.setAttribute('aria-pressed', String(k.important));
+  b.setAttribute('aria-label', k.important ? `${k.title}の「大事」を外す` : `${k.title}を大事にする`);
+  b.append(iconEl(svg(ICON_STAR, 16), ''));
+  b.addEventListener('click', () => void toggleImportant(k.id, b));
+  return b;
+}
+
+function renderKnowledgeCard(k: Knowledge): HTMLLIElement {
+  const li = document.createElement('li');
+  li.className = 'knowledge-card' + (k.important ? ' is-important' : '');
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'knowledge-card__btn';
+  b.setAttribute('aria-label', `${k.title}を開く`);
+  b.addEventListener('click', () => openKnowledgeDetail(k.id));
+  b.append(textEl('span', 'chip chip--category', KIND_LABEL[k.kind]));
+  b.append(textEl('h3', 'knowledge-card__title', k.title));
+  if (k.body) b.append(textEl('p', 'knowledge-card__body', k.body));
+  if (k.source) b.append(textEl('p', 'knowledge-card__source', `― ${k.source}`));
+  li.append(b, starToggle(k, 'knowledge-card__star'));
+  return li;
+}
+
+function renderKnowledges(): void {
+  renderKindBar();
+  renderToday();
+  knowledgeList.textContent = '';
+  const list = filteredKnowledges();
+  list.forEach((k) => knowledgeList.append(renderKnowledgeCard(k)));
+  const starred = knowledges.filter((k) => k.important).length;
+  $('knowledge-summary').textContent = knowledges.length ? `${list.length}件 ・ 大事 ${starred}件` : '';
+  $('knowledge-empty-first').classList.toggle('hidden', knowledges.length > 0);
+  $('knowledge-empty-match').classList.toggle('hidden', knowledges.length === 0 || list.length > 0);
+}
+
 function render(): void {
-  if (!netasLoaded || !personsLoaded) return;
+  if (!netasLoaded || !personsLoaded || !knowledgesLoaded) return;
   loadingEl.classList.add('hidden');
   renderTabs();
   renderNetas();
   renderPersons();
+  renderKnowledges();
 
   if (netaDetailId) {
     if (findNeta(netaDetailId)) renderNetaDetail();
@@ -447,6 +584,10 @@ function render(): void {
   if (personDetailId) {
     if (findPerson(personDetailId)) renderPersonDetail();
     else closePersonDetail();
+  }
+  if (knowledgeDetailId) {
+    if (findKnowledge(knowledgeDetailId)) renderKnowledgeDetail();
+    else closeKnowledgeDetail();
   }
   if (omakaseId && !findNeta(omakaseId)) closeOverlay(omakaseOverlay);
 }
@@ -673,6 +814,9 @@ function renderPersonDetail(): void {
   $('person-detail-cautions-section').classList.toggle('is-empty', !p.cautions.trim());
   $('person-detail-likes').textContent = p.likes;
   $('person-detail-likes-section').classList.toggle('hidden', !p.likes.trim());
+  const hint = todayKnowledge();
+  $('person-detail-hint').classList.toggle('hidden', !hint);
+  $('person-detail-hint-title').textContent = hint?.title ?? '';
   $('person-detail-memo').textContent = p.memo;
   $('person-detail-memo-section').classList.toggle('hidden', !p.memo.trim());
 
@@ -831,10 +975,129 @@ async function savePerson(e: Event): Promise<void> {
 }
 
 // ============================================================
+// ナレッジの詳細・追加・編集
+// ============================================================
+function toggleImportant(id: string, btn: HTMLButtonElement | null): Promise<void> {
+  return guarded(`star:${id}`, btn, async () => {
+    const k = findKnowledge(id);
+    if (!currentUser || !k) return;
+    await setKnowledgeImportant(currentUser.uid, k.id, !k.important);
+    showToast(k.important ? '「大事」を外しました' : '大事なナレッジにしました');
+  });
+}
+
+function openKnowledgeDetail(id: string): void {
+  if (!findKnowledge(id)) return;
+  knowledgeDetailId = id;
+  renderKnowledgeDetail();
+  openOverlay(knowledgeDetailOverlay);
+}
+
+function closeKnowledgeDetail(): void {
+  knowledgeDetailId = null;
+  closeOverlay(knowledgeDetailOverlay);
+}
+
+function renderKnowledgeDetail(): void {
+  const k = findKnowledge(knowledgeDetailId);
+  if (!k) return;
+  $('knowledge-detail-kind').textContent = KIND_LABEL[k.kind];
+  $('knowledge-detail-title').textContent = k.title;
+  const meta: string[] = [];
+  if (k.source) meta.push(`出典：${k.source}`);
+  const d = new Date(k.updatedAt);
+  meta.push(`更新：${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`);
+  $('knowledge-detail-meta').textContent = meta.join(' ・ ');
+  $('knowledge-detail-body').textContent = k.body;
+  $('knowledge-detail-body-section').classList.toggle('hidden', !k.body);
+  const star = $<HTMLButtonElement>('btn-knowledge-detail-star');
+  star.classList.toggle('is-active', k.important);
+  star.setAttribute('aria-pressed', String(k.important));
+}
+
+function renderEditorStar(): void {
+  knowledgeEditorStar.classList.toggle('is-active', knowledgeEditorImportant);
+  knowledgeEditorStar.setAttribute('aria-pressed', String(knowledgeEditorImportant));
+}
+
+function knowledgeEditorState(): string {
+  return JSON.stringify([
+    knowledgeTitleInput.value, knowledgeKindSelect.value, knowledgeSourceInput.value, knowledgeBodyInput.value,
+    knowledgeEditorImportant,
+  ]);
+}
+
+function openKnowledgeEditor(id: string | null): void {
+  const k = findKnowledge(id);
+  editingKnowledgeId = k ? k.id : null;
+  $('knowledge-editor-title').textContent = k ? 'ナレッジを編集' : 'ナレッジを追加';
+  knowledgeTitleInput.value = k?.title ?? '';
+  knowledgeKindSelect.textContent = '';
+  KNOWLEDGE_KINDS.forEach((kind) => {
+    const o = document.createElement('option');
+    o.value = kind;
+    o.textContent = KIND_LABEL[kind];
+    knowledgeKindSelect.append(o);
+  });
+  const defaultKind = !k && KNOWLEDGE_KINDS.includes(selectedKind as KnowledgeKind) ? (selectedKind as KnowledgeKind) : 'listen';
+  knowledgeKindSelect.value = k ? k.kind : defaultKind;
+  knowledgeSourceInput.value = k?.source ?? '';
+  knowledgeBodyInput.value = k?.body ?? '';
+  knowledgeEditorImportant = k?.important ?? false;
+  renderEditorStar();
+  activeEditor = 'knowledge';
+  editorSnapshot = knowledgeEditorState();
+  openOverlay(knowledgeEditorOverlay);
+  if (!k) knowledgeTitleInput.focus();
+}
+
+async function saveKnowledge(e: Event): Promise<void> {
+  e.preventDefault();
+  if (editorBusy || !currentUser) return;
+  const title = knowledgeTitleInput.value.trim();
+  if (!title) {
+    showToast('タイトルを入力してください');
+    knowledgeTitleInput.focus();
+    return;
+  }
+  editorBusy = true;
+  knowledgeSaveBtn.disabled = true;
+  knowledgeSaveBtn.textContent = '保存中…';
+  try {
+    const data: KnowledgeData = {
+      title,
+      kind: knowledgeKindSelect.value as KnowledgeKind,
+      source: knowledgeSourceInput.value,
+      body: knowledgeBodyInput.value,
+      important: knowledgeEditorImportant,
+    };
+    const existing = findKnowledge(editingKnowledgeId);
+    if (existing) {
+      await updateKnowledge(currentUser.uid, existing.id, data);
+      showToast('保存しました');
+    } else {
+      await createKnowledge(currentUser.uid, data);
+      showToast('ナレッジを追加しました');
+    }
+    closeEditor();
+  } catch (err) {
+    console.error(err);
+    showToast('保存に失敗しました。通信環境を確認してください');
+  } finally {
+    editorBusy = false;
+    knowledgeSaveBtn.disabled = false;
+    knowledgeSaveBtn.textContent = '保存する';
+  }
+}
+
+// ============================================================
 // 編集画面の共通処理
 // ============================================================
 function currentEditorState(): string {
-  return activeEditor === 'neta' ? netaEditorState() : activeEditor === 'person' ? personEditorState() : '';
+  if (activeEditor === 'neta') return netaEditorState();
+  if (activeEditor === 'person') return personEditorState();
+  if (activeEditor === 'knowledge') return knowledgeEditorState();
+  return '';
 }
 
 function requestCloseEditor(): void {
@@ -846,9 +1109,11 @@ function requestCloseEditor(): void {
 function closeEditor(): void {
   closeOverlay(netaEditorOverlay);
   closeOverlay(personEditorOverlay);
+  closeOverlay(knowledgeEditorOverlay);
   closeOverlay(discardOverlay);
   editingNetaId = null;
   editingPersonId = null;
+  editingKnowledgeId = null;
   netaEditorPersons = [];
   activeEditor = null;
 }
@@ -997,6 +1262,14 @@ async function addPersonSample(btn: HTMLButtonElement): Promise<void> {
   }, '追加に失敗しました');
 }
 
+async function addKnowledgeSamples(btn: HTMLButtonElement): Promise<void> {
+  await guarded('samples:knowledge', btn, async () => {
+    if (!currentUser) return;
+    for (const k of SAMPLE_KNOWLEDGES) await createKnowledge(currentUser.uid, k);
+    showToast('サンプルのナレッジを追加しました');
+  }, '追加に失敗しました');
+}
+
 // ============================================================
 // 認証
 // ============================================================
@@ -1037,6 +1310,11 @@ function startSession(user: User): void {
       render();
       if (netaEditorOverlay.classList.contains('is-open')) renderNetaPersonPicker();
     }, fail),
+    subscribeKnowledges(user.uid, (list) => {
+      knowledges = list;
+      knowledgesLoaded = true;
+      render();
+    }, fail),
   ];
 }
 
@@ -1047,18 +1325,23 @@ function endSession(): void {
   netas = [];
   persons = [];
   categories = [];
+  knowledges = [];
   netasLoaded = false;
   personsLoaded = false;
+  knowledgesLoaded = false;
   netaList.textContent = '';
   personList.textContent = '';
+  knowledgeList.textContent = '';
   netaPanel.classList.add('hidden');
   personPanel.classList.add('hidden');
+  knowledgePanel.classList.add('hidden');
   loadingEl.classList.remove('hidden');
   loadingEl.textContent = '読み込み中…';
-  [netaDetailOverlay, netaEditorOverlay, omakaseOverlay, personDetailOverlay, personEditorOverlay, categoryOverlay,
-    discardOverlay, confirmOverlay].forEach(closeOverlay);
+  [netaDetailOverlay, netaEditorOverlay, omakaseOverlay, personDetailOverlay, personEditorOverlay, knowledgeDetailOverlay,
+    knowledgeEditorOverlay, categoryOverlay, discardOverlay, confirmOverlay].forEach(closeOverlay);
   netaDetailId = null;
   personDetailId = null;
+  knowledgeDetailId = null;
   activeEditor = null;
   appEl.classList.add('hidden');
   loginScreen.classList.remove('hidden');
@@ -1089,6 +1372,7 @@ function bindEvents(): void {
 
   tabNeta.addEventListener('click', () => setTab('neta'));
   tabPerson.addEventListener('click', () => setTab('person'));
+  tabKnowledge.addEventListener('click', () => setTab('knowledge'));
 
   // ネタ一覧
   const netaSearch = $<HTMLInputElement>('input-neta-search');
@@ -1143,6 +1427,67 @@ function bindEvents(): void {
   $('btn-person-new').addEventListener('click', () => openPersonEditor(null));
   $('btn-person-empty-new').addEventListener('click', () => openPersonEditor(null));
   $('btn-person-sample').addEventListener('click', (e) => void addPersonSample(e.currentTarget as HTMLButtonElement));
+
+  // ナレッジ一覧
+  const knowledgeSearch = $<HTMLInputElement>('input-knowledge-search');
+  knowledgeSearch.addEventListener('input', () => {
+    knowledgeQuery = knowledgeSearch.value;
+    render();
+  });
+  const knowledgeSortSelect = $<HTMLSelectElement>('select-knowledge-sort');
+  knowledgeSortSelect.value = KNOWLEDGE_SORTS.includes(knowledgeSort) ? knowledgeSort : 'important';
+  knowledgeSort = knowledgeSortSelect.value;
+  knowledgeSortSelect.addEventListener('change', () => {
+    knowledgeSort = knowledgeSortSelect.value;
+    lsSet(KNOWLEDGE_SORT_KEY, knowledgeSort);
+    render();
+  });
+  $('btn-knowledge-clear').addEventListener('click', () => {
+    knowledgeQuery = '';
+    knowledgeSearch.value = '';
+    selectedKind = ALL;
+    lsSet(KIND_KEY, ALL);
+    render();
+  });
+  $('btn-knowledge-new').addEventListener('click', () => openKnowledgeEditor(null));
+  $('btn-knowledge-empty-new').addEventListener('click', () => openKnowledgeEditor(null));
+  $('btn-knowledge-samples').addEventListener('click', (e) => void addKnowledgeSamples(e.currentTarget as HTMLButtonElement));
+  $('btn-today-next').addEventListener('click', () => {
+    todayOffset++;
+    renderToday();
+  });
+  $('btn-today-open').addEventListener('click', () => {
+    const k = todayKnowledge();
+    if (k) openKnowledgeDetail(k.id);
+  });
+
+  // ナレッジの詳細・編集
+  $('btn-knowledge-detail-close').addEventListener('click', closeKnowledgeDetail);
+  $('btn-knowledge-detail-edit').addEventListener('click', () => openKnowledgeEditor(knowledgeDetailId));
+  $('btn-knowledge-detail-star').addEventListener('click', (e) => {
+    if (knowledgeDetailId) void toggleImportant(knowledgeDetailId, e.currentTarget as HTMLButtonElement);
+  });
+  $('btn-knowledge-detail-delete').addEventListener('click', () => {
+    const k = findKnowledge(knowledgeDetailId);
+    if (!k) return;
+    askConfirm('ナレッジを削除しますか？', `「${k.title}」を削除します。元に戻せません。`, async () => {
+      if (!currentUser) return;
+      await deleteKnowledge(currentUser.uid, k.id);
+      closeKnowledgeDetail();
+      showToast('削除しました');
+    });
+  });
+  $('knowledge-editor-form').addEventListener('submit', (e) => void saveKnowledge(e));
+  $('btn-knowledge-editor-close').addEventListener('click', requestCloseEditor);
+  $('btn-knowledge-editor-cancel').addEventListener('click', requestCloseEditor);
+  knowledgeEditorStar.addEventListener('click', () => {
+    knowledgeEditorImportant = !knowledgeEditorImportant;
+    renderEditorStar();
+  });
+  $('person-detail-hint').addEventListener('click', () => {
+    const k = todayKnowledge();
+    if (k) openKnowledgeDetail(k.id);
+  });
 
   // ネタの詳細
   $('btn-neta-detail-close').addEventListener('click', closeNetaDetail);
@@ -1255,6 +1600,8 @@ function bindEvents(): void {
     [omakaseOverlay, () => closeOverlay(omakaseOverlay)],
     [netaEditorOverlay, requestCloseEditor],
     [personEditorOverlay, requestCloseEditor],
+    [knowledgeDetailOverlay, closeKnowledgeDetail],
+    [knowledgeEditorOverlay, requestCloseEditor],
     [categoryOverlay, () => closeOverlay(categoryOverlay)],
     [discardOverlay, () => closeOverlay(discardOverlay)],
     [confirmOverlay, () => { confirmAction = null; closeOverlay(confirmOverlay); }],
